@@ -3,10 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
-	"time"
+
+	"github.com/juanfbages/utilities"
 )
 
 type Stations struct {
@@ -14,8 +13,8 @@ type Stations struct {
 }
 
 type Station struct {
-	StationProperties Properties `json:"properties"`
-	Geometry          Geometry   `json:"geometry"`
+	StationProperties StationProperties `json:"properties"`
+	Geometry          Geometry          `json:"geometry"`
 }
 
 type Geometry struct {
@@ -23,7 +22,7 @@ type Geometry struct {
 	Coordinates []float64 `json:"coordinates"`
 }
 
-type Properties struct {
+type StationProperties struct {
 	StationID        string `json:"station_id"`
 	Name             string `json:"name"`
 	BikeAngelsAction string `json:"bike_angels_action"`
@@ -48,35 +47,6 @@ type Address struct {
 	Postcode      string `json:"postcode"`
 }
 
-func CurlURL(url string) (body []byte) {
-
-	Client := http.Client{Timeout: time.Second * 5}
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	req.Header.Set("User-Agent", "curler")
-
-	res, getErr := Client.Do(req)
-	if getErr != nil {
-		log.Fatal(getErr)
-	}
-
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	body, readErr := ioutil.ReadAll(res.Body)
-	if readErr != nil {
-		log.Fatal(readErr)
-	}
-
-	return body
-
-}
-
 func OSMURLBuilder(lat float64, lon float64) string {
 	baseUrl := "https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&q="
 	params := fmt.Sprintf("%f%%2C%f", lat, lon)
@@ -86,7 +56,7 @@ func OSMURLBuilder(lat float64, lon float64) string {
 
 func main() {
 
-	statusBody := CurlURL("https://layer.bicyclesharing.net/map/v1/nyc/stations")
+	statusBody := utilities.CurlURL("https://layer.bicyclesharing.net/map/v1/nyc/stations")
 
 	var stationStatus Stations
 	jsonStatusErr := json.Unmarshal(statusBody, &stationStatus)
@@ -94,12 +64,14 @@ func main() {
 		log.Fatal(jsonStatusErr)
 	}
 
+	pointsByLocation := make(map[string][]StationProperties)
+
 	for _, station := range stationStatus.Station {
 		lon := station.Geometry.Coordinates[0]
 		lat := station.Geometry.Coordinates[1]
 
 		osmURL := OSMURLBuilder(lat, lon)
-		osmBody := CurlURL(osmURL)
+		osmBody := utilities.CurlURL(osmURL)
 
 		var osmPlaces []Place
 		jsonOSMErr := json.Unmarshal(osmBody, &osmPlaces)
@@ -107,11 +79,16 @@ func main() {
 			log.Fatal(jsonOSMErr)
 		}
 
-		fmt.Printf(
-			"Station: %v, Neighbourhood: %v, Zipcode: %v\n",
-			station.StationProperties.Name,
-			osmPlaces[0].Address.Neighbourhood,
-			osmPlaces[0].Address.Postcode)
+		neighbourhood := osmPlaces[0].Address.Neighbourhood
+		pointsByLocation[neighbourhood] = append(pointsByLocation[neighbourhood], station.StationProperties)
 
+		if neighbourhood == "Upper West Side" {
+			fmt.Printf(
+				"\nStation: %v\n\tNeighbourhood: %v\n\tBikeAction: %v\n\tBikePoints: %v\n",
+				station.StationProperties.Name,
+				osmPlaces[0].Address.Neighbourhood,
+				station.StationProperties.BikeAngelsAction,
+				station.StationProperties.BikeAngelsPoints)
+		}
 	}
 }
